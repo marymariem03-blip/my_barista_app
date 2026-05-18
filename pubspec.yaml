@@ -1,0 +1,59 @@
+name: my_barista_app
+description: "Barista's — The coffee specialist app."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ── UI ────────────────────────────────────────────
+  cupertino_icons: ^1.0.8
+
+  # ── Firebase ──────────────────────────────────────
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1           # login · signup · logout
+  cloud_firestore: ^5.4.4         # database (users · orders · products)
+  firebase_storage: ^12.3.3       # images (plats · avatars · sip&share)
+  firebase_messaging: ^15.1.3     # push notifications
+
+  # ── State & Utils ─────────────────────────────────
+  shared_preferences: ^2.3.2      # local storage (auth token · branch)
+  image_picker: ^1.1.2            # pick plat photo / avatar / sip&share
+  cached_network_image: ^3.4.1    # cache product & post images
+  intl: ^0.19.0                   # date formatting (orders · dob)
+  uuid: ^4.5.1                    # generate order IDs
+
+  # ── Maps & Location ───────────────────────────────
+  google_maps_flutter: ^2.9.0     # branch map
+  geolocator: ^13.0.1             # get user location
+
+  # ── Permissions ───────────────────────────────────
+  permission_handler: ^11.3.1     # camera · gallery · location permissions
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/images/branches/
+    - assets/icons/
+
+  fonts:
+    - family: LeagueSpartan
+      fonts:
+        - asset: assets/fonts/LeagueSpartan-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/LeagueSpartan-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/LeagueSpartan-Black.ttf
+          weight: 900
