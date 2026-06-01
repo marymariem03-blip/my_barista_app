@@ -6,6 +6,7 @@ class Plat {
   double price;
   String category;
   String image;
+  String description;
   bool isBestSeller;
 
   Plat({
@@ -14,13 +15,14 @@ class Plat {
     required this.price,
     required this.category,
     required this.image,
+    this.description  = '',
     this.isBestSeller = false,
   });
 
+  // ✅ "11,500dt"
   String get formattedPrice =>
-      '${price.toStringAsFixed(3).replaceAll('.', ',')} DT';
+      '${price.toStringAsFixed(3).replaceAll('.', ',')}dt';
 
-  // ── Category label (shown in manager card badge) ──────
   String get categoryLabel {
     switch (category) {
       case 'hot_drinks':  return 'Hot Drinks';
@@ -31,7 +33,18 @@ class Plat {
     }
   }
 
-  // ── Default image per category ─────────────────────────
+  String get subtitle {
+    final desc = description ?? '';
+    if (desc.isNotEmpty) return desc;
+    switch (category) {
+      case 'hot_drinks':  return 'Café, lait et noisette';
+      case 'cold_drinks': return 'Café au lait glacé';
+      case 'sweet':       return 'Pâtisserie maison';
+      case 'savory':      return 'Plat savoureux';
+      default:            return '';
+    }
+  }
+
   static String defaultImageFor(String category) {
     switch (category) {
       case 'hot_drinks':  return 'assets/images/macchiato.png';
@@ -55,7 +68,8 @@ class Plat {
     double? price,
     String? category,
     String? image,
-    bool? isBestSeller,
+    String? description,
+    bool?   isBestSeller,
   }) {
     return Plat(
       id:           id,
@@ -63,6 +77,7 @@ class Plat {
       price:        price        ?? this.price,
       category:     category     ?? this.category,
       image:        image        ?? this.image,
+      description:  description  ?? this.description,
       isBestSeller: isBestSeller ?? this.isBestSeller,
     );
   }

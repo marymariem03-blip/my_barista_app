@@ -1,7 +1,10 @@
+// lib/screens/manager/manager_main_screen.dart
+
 import 'package:flutter/material.dart';
 import '../../core/constants/colors.dart';
 import 'manager_dashboard_screen.dart';
 import 'manager_plats_screen.dart';
+import 'manager_feedbacks_screen.dart'; 
 import 'manager_profile_screen.dart';
 
 class ManagerMainScreen extends StatefulWidget {
@@ -23,57 +26,75 @@ class _ManagerMainScreenState extends State<ManagerMainScreen> {
         children: const [
           ManagerDashboardScreen(),
           ManagerPlatsScreen(),
+          ManagerFeedbacksScreen(), 
           ManagerProfileScreen(),
         ],
       ),
-      bottomNavigationBar: Container(
-        height: 68,
+      bottomNavigationBar: SafeArea(
+        child: Container(
+        height: 72,
         decoration: const BoxDecoration(
           color: kBrown,
           borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
+            topLeft:  Radius.circular(24),
+            topRight: Radius.circular(24),
           ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
             _NavItem(
-              icon: Icons.dashboard_outlined,
-              label: 'Dashboard',
-              isActive: _tab == 0,
-              onTap: () => setState(() => _tab = 0),
+              assetIcon: 'assets/icons/dashboard.png',
+              fallback:  Icons.dashboard_outlined,
+              isActive:  _tab == 0,
+              onTap:     () => setState(() => _tab = 0),
             ),
             _NavItem(
-              icon: Icons.restaurant_menu_outlined,
-              label: 'Plats',
-              isActive: _tab == 1,
-              onTap: () => setState(() => _tab = 1),
+              assetIcon:  'assets/icons/dish.png',
+              fallback:   Icons.restaurant_menu_outlined,
+              isActive:   _tab == 1,
+              onTap:      () => setState(() => _tab = 1),
+              iconWidth:  46,
+              iconHeight: 50,
             ),
             _NavItem(
-              icon: Icons.person_outline,
-              label: 'Profil',
-              isActive: _tab == 2,
-              onTap: () => setState(() => _tab = 2),
+              assetIcon: 'assets/icons/feedbacks.png',
+              fallback:  Icons.chat_bubble_outline,
+              isActive:  _tab == 2,
+              onTap:     () => setState(() => _tab = 2),
+            ),
+            _NavItem(
+              assetIcon: 'assets/icons/prof.png',
+              fallback:  Icons.person_outline,
+              isActive:  _tab == 3,
+              onTap:     () => setState(() => _tab = 3),
+              iconWidth:  60,
+              iconHeight: 65,
             ),
           ],
         ),
+      ),
       ),
     );
   }
 }
 
+// ── Nav item ─────────────────────────────────────────────
 class _NavItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool isActive;
+  final String       assetIcon;
+  final IconData     fallback;
+  final bool         isActive;
   final VoidCallback onTap;
+  final double       iconWidth;
+  final double       iconHeight;
 
   const _NavItem({
-    required this.icon,
-    required this.label,
+    required this.assetIcon,
+    required this.fallback,
     required this.isActive,
     required this.onTap,
+    this.iconWidth  = 28,
+    this.iconHeight = 28,
   });
 
   @override
@@ -81,27 +102,17 @@ class _NavItem extends StatelessWidget {
     final color = isActive ? Colors.white : Colors.white38;
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        decoration: BoxDecoration(
-          color: isActive ? Colors.white12 : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 3),
-            Text(label,
-                style: TextStyle(
-                    fontFamily: 'LeagueSpartan',
-                    color: color,
-                    fontSize: 11,
-                    fontWeight: isActive
-                        ? FontWeight.w700
-                        : FontWeight.w400)),
-          ],
+      child: SizedBox(
+        width: 56, height: 56,
+        child: Center(
+          child: Image.asset(
+            assetIcon,
+            width:  iconWidth,
+            height: iconHeight,
+            color:  color,
+            errorBuilder: (_, __, ___) =>
+                Icon(fallback, color: color, size: 28),
+          ),
         ),
       ),
     );

@@ -7,6 +7,7 @@ import 'profile_screen.dart';
 import 'page2_login_screen.dart';
 import 'find_barista_screen.dart';
 import 'settings_screen.dart';
+import 'payment_screen.dart';
 
 class ProfileDrawerScreen extends StatefulWidget {
   const ProfileDrawerScreen({super.key});
@@ -200,10 +201,14 @@ class _ProfileDrawerScreenState extends State<ProfileDrawerScreen> {
                   _divider(),
 
                   _DrawerItem(
-                    assetIcon: 'assets/icons/payment.png',
-                    label:     'Payment Methods',
-                    onTap:     () => Navigator.pop(context),
-                  ),
+  assetIcon: 'assets/icons/payment.png',
+  label:     'Payment Methods',
+  onTap: () {
+    Navigator.pop(context);
+    Navigator.push(context, MaterialPageRoute(
+        builder: (_) => const PaymentScreen()));
+  },
+),
                   _divider(),
 
                   _DrawerItem(

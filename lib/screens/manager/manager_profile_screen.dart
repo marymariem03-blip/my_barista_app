@@ -1,6 +1,14 @@
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 import '../../core/constants/colors.dart';
-import '../../core/services/service_locator.dart';
 import '../page2_login_screen.dart';
 
 class ManagerProfileScreen extends StatefulWidget {
@@ -9,249 +17,418 @@ class ManagerProfileScreen extends StatefulWidget {
 }
 
 class _ManagerProfileScreenState extends State<ManagerProfileScreen> {
-  final _service = ServiceLocator.platService;
+  final _db   = FirebaseFirestore.instance;
+  final _auth = FirebaseAuth.instance;
 
+  String _name   = '';
+  String _email  = '';
+  String _avatar = '';
+  bool   _loading = true;
   bool   _editMode = false;
   bool   _saving   = false;
-  late final TextEditingController _nameCtrl;
-  late final TextEditingController _emailCtrl;
-  late String _selectedAvatar;
 
-  static const _avatars = ['☕', '🧑‍💼', '👩‍💼', '🧑‍🍳', '👨‍🍳', '⭐'];
+  late TextEditingController _nameCtrl;
+  File?       _pickedImage;
+  Uint8List?  _imageBytes;
+
+  static const _cloudName    = 'dme1fc8qw';
+  static const _uploadPreset = 'my_barista_preset';
 
   @override
   void initState() {
     super.initState();
-    _nameCtrl       = TextEditingController(text: _service.managerName);
-    _emailCtrl      = TextEditingController(text: _service.managerEmail);
-    _selectedAvatar = _service.managerAvatarAsset.isEmpty ? '☕' : _service.managerAvatarAsset;
+    _nameCtrl = TextEditingController();
+    _loadProfile();
   }
 
-  @override void dispose() { _nameCtrl.dispose(); _emailCtrl.dispose(); super.dispose(); }
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    super.dispose();
+  }
 
-  void _toggleEdit() {
-    if (_editMode) {
-      setState(() => _saving = true);
-      Future.delayed(const Duration(milliseconds: 400), () {
-        _service.updateManagerProfile(name: _nameCtrl.text.trim(), email: _emailCtrl.text.trim(), avatarAsset: _selectedAvatar);
-        if (mounted) setState(() { _saving = false; _editMode = false; });
-      });
+  Future<void> _loadProfile() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) { setState(() => _loading = false); return; }
+    final doc = await _db.collection('users').doc(uid).get();
+    if (mounted) setState(() {
+      final data = doc.data() ?? {};
+      _name   = (data['nom']    as String?) ?? '';
+      _email  = (data['email']  as String?) ?? _auth.currentUser?.email ?? '';
+      _avatar = (data['avatar'] as String?) ?? '';
+      _nameCtrl.text = _name;
+      _loading = false;
+    });
+  }
+
+  // ── Pick image ────────────────────────────────────────
+  Future<void> _pickImage() async {
+    final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery, imageQuality: 80);
+    if (picked == null) return;
+    if (kIsWeb) {
+      final bytes = await picked.readAsBytes();
+      setState(() { _imageBytes = bytes; _pickedImage = null; });
     } else {
-      setState(() => _editMode = true);
+      setState(() { _pickedImage = File(picked.path); _imageBytes = null; });
+    }
+  }
+
+  // ── Upload to Cloudinary ──────────────────────────────
+  Future<String?> _uploadImage() async {
+    final uri = Uri.parse(
+        'https://api.cloudinary.com/v1_1/$_cloudName/image/upload');
+    final req = http.MultipartRequest('POST', uri)
+      ..fields['upload_preset'] = _uploadPreset;
+    if (kIsWeb && _imageBytes != null) {
+      req.files.add(http.MultipartFile.fromBytes(
+          'file', _imageBytes!, filename: 'profile.jpg'));
+    } else if (_pickedImage != null) {
+      req.files.add(await http.MultipartFile.fromPath('file', _pickedImage!.path));
+    } else {
+      return null;
+    }
+    final res = await req.send();
+    if (res.statusCode == 200) {
+      final body = await res.stream.bytesToString();
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      return json['secure_url'] as String?;
+    }
+    return null;
+  }
+
+  // ── Save ──────────────────────────────────────────────
+  Future<void> _save() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    setState(() => _saving = true);
+
+    try {
+      String finalAvatar = _avatar;
+
+      if (_pickedImage != null || _imageBytes != null) {
+        final url = await _uploadImage();
+        if (url != null) finalAvatar = url;
+      }
+
+      await _db.collection('users').doc(uid).set({
+        'nom':    _nameCtrl.text.trim(),
+        'email':  _email,
+        'role':   'manager',
+        'avatar': finalAvatar,
+      }, SetOptions(merge: true));
+
+      if (mounted) setState(() {
+        _name   = _nameCtrl.text.trim();
+        _avatar = finalAvatar;
+        _pickedImage = null;
+        _editMode = false;
+        _saving   = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Erreur: $e',
+                style: const TextStyle(fontFamily: 'LeagueSpartan')),
+            backgroundColor: Colors.red));
+      }
     }
   }
 
   void _cancelEdit() {
     setState(() {
-      _nameCtrl.text  = _service.managerName;
-      _emailCtrl.text = _service.managerEmail;
-      _selectedAvatar = _service.managerAvatarAsset.isEmpty ? '☕' : _service.managerAvatarAsset;
-      _editMode = false;
+      _nameCtrl.text = _name;
+      _pickedImage   = null;
+      _imageBytes    = null;
+      _editMode      = false;
     });
   }
 
-  void _showAvatarPicker() {
-    showModalBottomSheet(context: context, backgroundColor: Colors.transparent, builder: (_) => Container(
-      padding: const EdgeInsets.all(24),
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('Choisir un avatar', style: TextStyle(fontFamily: 'LeagueSpartan', color: kBrown, fontSize: 16, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 20),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: _avatars.map((av) {
-          final isSel = av == _selectedAvatar;
-          return GestureDetector(
-            onTap: () { setState(() => _selectedAvatar = av); Navigator.pop(context); },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 54, height: 54,
-              decoration: BoxDecoration(color: isSel ? kBrown : kInputBg, shape: BoxShape.circle, border: Border.all(color: isSel ? kBrown : Colors.transparent, width: 2)),
-              child: Center(child: Text(av, style: const TextStyle(fontSize: 26))),
-            ),
-          );
-        }).toList()),
-        const SizedBox(height: 16),
-      ]),
-    ));
-  }
-
   void _showLogout() {
-    showModalBottomSheet(context: context, backgroundColor: Colors.transparent, builder: (_) => Container(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(4))),
-        const SizedBox(height: 20),
-        const Text('Se deconnecter ?', style: TextStyle(fontFamily: 'LeagueSpartan', color: kBrown, fontSize: 18, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 8),
-        Text('Vous serez redirige vers la connexion.', style: TextStyle(fontFamily: 'LeagueSpartan', color: kBrown.withOpacity(0.55), fontSize: 13)),
-        const SizedBox(height: 24),
-        Row(children: [
-          Expanded(child: GestureDetector(onTap: () => Navigator.pop(context), child: Container(height: 50, decoration: BoxDecoration(color: kInputBg, borderRadius: BorderRadius.circular(32)), alignment: Alignment.center, child: const Text('Annuler', style: TextStyle(fontFamily: 'LeagueSpartan', color: kBrown, fontSize: 16, fontWeight: FontWeight.w700))))),
-          const SizedBox(width: 12),
-          Expanded(child: GestureDetector(
-            onTap: () { Navigator.pop(context); Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false); },
-            child: Container(height: 50, decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(32)), alignment: Alignment.center, child: const Text('Deconnecter', style: TextStyle(fontFamily: 'LeagueSpartan', color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700))),
-          )),
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        decoration: const BoxDecoration(color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 40, height: 4,
+              decoration: BoxDecoration(color: Colors.black12,
+                  borderRadius: BorderRadius.circular(4))),
+          const SizedBox(height: 20),
+          const Text('Se déconnecter ?', style: TextStyle(
+              fontFamily: 'LeagueSpartan', color: kBrown,
+              fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          Text('Vous serez redirigé vers la connexion.',
+              style: TextStyle(fontFamily: 'LeagueSpartan',
+                  color: kBrown.withOpacity(0.5), fontSize: 13)),
+          const SizedBox(height: 24),
+          Row(children: [
+            Expanded(child: GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Container(height: 50,
+                  decoration: BoxDecoration(color: kInputBg,
+                      borderRadius: BorderRadius.circular(32)),
+                  alignment: Alignment.center,
+                  child: const Text('Annuler', style: TextStyle(
+                      fontFamily: 'LeagueSpartan', color: kBrown,
+                      fontSize: 15, fontWeight: FontWeight.w700))),
+            )),
+            const SizedBox(width: 12),
+            Expanded(child: GestureDetector(
+              onTap: () async {
+                Navigator.pop(context);
+                await _auth.signOut();
+                if (mounted) Navigator.pushAndRemoveUntil(context,
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    (route) => false);
+              },
+              child: Container(height: 50,
+                  decoration: BoxDecoration(color: Colors.red,
+                      borderRadius: BorderRadius.circular(32)),
+                  alignment: Alignment.center,
+                  child: const Text('Déconnecter', style: TextStyle(
+                      fontFamily: 'LeagueSpartan', color: Colors.white,
+                      fontSize: 15, fontWeight: FontWeight.w700))),
+            )),
+          ]),
         ]),
-      ]),
-    ));
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final topPad = MediaQuery.of(context).padding.top;
 
+    if (_loading) return const Center(
+        child: CircularProgressIndicator(color: kBrown));
+
+    // Avatar to show — picked image takes priority
+    Widget avatarWidget;
+    if (_imageBytes != null) {
+      avatarWidget = Image.memory(_imageBytes!, fit: BoxFit.cover);
+    } else if (_pickedImage != null) {
+      avatarWidget = Image.file(_pickedImage!, fit: BoxFit.cover);
+    } else if (_avatar.isNotEmpty) {
+      avatarWidget = CachedNetworkImage(imageUrl: _avatar, fit: BoxFit.cover,
+          errorWidget: (_, __, ___) => const Icon(Icons.person,
+              color: Colors.white54, size: 48));
+    } else {
+      avatarWidget = const Icon(Icons.person, color: Colors.white54, size: 48);
+    }
+
     return Column(children: [
-      // ── Header ───────────────────────────────────────
+
+      // ── Dark header ───────────────────────────────────
       Container(
         color: kBrown,
-        padding: EdgeInsets.only(top: topPad + 14, left: 20, right: 20, bottom: 28),
+        width: double.infinity,
+        padding: EdgeInsets.only(
+            top: topPad + 12, left: 20, right: 20, bottom: 32),
         child: Column(children: [
-          // Edit / Save / Cancel row
+
+          // Top buttons row
           Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            if (_editMode) GestureDetector(onTap: _cancelEdit, child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
-              child: const Text('Annuler', style: TextStyle(fontFamily: 'LeagueSpartan', color: Colors.white, fontSize: 12)),
-            )),
-            const SizedBox(width: 8),
+            if (_editMode) ...[
+              GestureDetector(
+                onTap: _cancelEdit,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 7),
+                  decoration: BoxDecoration(color: Colors.white24,
+                      borderRadius: BorderRadius.circular(20)),
+                  child: const Text('Annuler', style: TextStyle(
+                      fontFamily: 'LeagueSpartan', color: Colors.white,
+                      fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
             GestureDetector(
-              onTap: _toggleEdit,
+              onTap: _editMode ? _save : () => setState(() => _editMode = true),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                decoration: BoxDecoration(color: _editMode ? Colors.white : Colors.white24, borderRadius: BorderRadius.circular(20)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  _saving
-                      ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: _editMode ? kBrown : Colors.white))
-                      : Icon(_editMode ? Icons.check : Icons.edit_outlined, color: _editMode ? kBrown : Colors.white, size: 14),
-                  const SizedBox(width: 4),
-                  Text(_editMode ? 'Enregistrer' : 'Modifier', style: TextStyle(fontFamily: 'LeagueSpartan', color: _editMode ? kBrown : Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
-                ]),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                    color: _editMode ? Colors.white : Colors.white,
+                    borderRadius: BorderRadius.circular(20)),
+                child: _saving
+                    ? const SizedBox(width: 14, height: 14,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: kBrown))
+                    : Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(_editMode ? Icons.check : Icons.edit_outlined,
+                            color: kBrown, size: 14),
+                        const SizedBox(width: 5),
+                        Text(_editMode ? 'Enregistrer' : 'Modifier',
+                            style: const TextStyle(
+                                fontFamily: 'LeagueSpartan', color: kBrown,
+                                fontSize: 13, fontWeight: FontWeight.w700)),
+                      ]),
               ),
             ),
           ]),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
 
           // Avatar
           Stack(children: [
-            Container(width: 80, height: 80,
-                decoration: BoxDecoration(color: Colors.white24, shape: BoxShape.circle, border: Border.all(color: Colors.white38, width: 2)),
-                child: Center(child: Text(_selectedAvatar, style: const TextStyle(fontSize: 36)))),
-            if (_editMode) Positioned(bottom: 0, right: 0, child: GestureDetector(
-              onTap: _showAvatarPicker,
-              child: Container(width: 26, height: 26, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: const Icon(Icons.camera_alt, color: kBrown, size: 14)),
-            )),
+            Container(
+              width: 100, height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2.5),
+                color: Colors.white24,
+              ),
+              child: ClipOval(child: avatarWidget),
+            ),
+            if (_editMode)
+              Positioned(
+                bottom: 0, right: 0,
+                child: GestureDetector(
+                  onTap: _pickImage,
+                  child: Container(
+                    width: 30, height: 30,
+                    decoration: const BoxDecoration(
+                        color: Colors.white, shape: BoxShape.circle),
+                    child: const Icon(Icons.camera_alt,
+                        color: kBrown, size: 16),
+                  ),
+                ),
+              ),
           ]),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
 
-          // Name
+          // Name — editable in edit mode
           _editMode
-              ? _HeaderField(controller: _nameCtrl, hint: 'Votre nom')
-              : Text(_service.managerName, style: const TextStyle(fontFamily: 'LeagueSpartan', color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+              ? Container(
+                  width: 240,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 4),
+                  decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(12)),
+                  child: TextField(
+                    controller: _nameCtrl,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontFamily: 'LeagueSpartan',
+                        color: Colors.white, fontSize: 20,
+                        fontWeight: FontWeight.w700),
+                    decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        hintText: 'Votre nom',
+                        hintStyle: TextStyle(color: Colors.white54)),
+                  ),
+                )
+              : Text(
+                  (_name.isNotEmpty) ? _name : "Manager Barista's",
+                  style: const TextStyle(fontFamily: 'LeagueSpartan',
+                      color: Colors.white, fontSize: 22,
+                      fontWeight: FontWeight.w800),
+                ),
           const SizedBox(height: 4),
 
-          // Email
-          _editMode
-              ? _HeaderField(controller: _emailCtrl, hint: 'Votre email', small: true)
-              : Text(_service.managerEmail, style: TextStyle(fontFamily: 'LeagueSpartan', color: Colors.white.withOpacity(0.6), fontSize: 13)),
+          // Email (not editable)
+          Text(
+            (_email.isNotEmpty) ? _email : 'manager@barista.com',
+            style: TextStyle(fontFamily: 'LeagueSpartan',
+                color: Colors.white.withOpacity(0.6), fontSize: 13),
+          ),
         ]),
       ),
 
-      // ── Content ──────────────────────────────────────
+      // ── Content ───────────────────────────────────────
       Expanded(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           child: Column(children: [
-            // Stats
-            Row(children: [
-              Expanded(child: _StatMini(label: 'Plats', value: '${_service.totalPlats}', icon: Icons.restaurant_menu_outlined)),
-              const SizedBox(width: 12),
-              Expanded(child: _StatMini(label: 'Commandes', value: '${_service.totalFakeOrders}', icon: Icons.receipt_long_outlined)),
-              const SizedBox(width: 12),
-              Expanded(child: _StatMini(label: 'Ventes DT', value: _service.totalFakeSales.toStringAsFixed(0), icon: Icons.attach_money)),
-            ]),
-            const SizedBox(height: 16),
 
             // Info card
-            _InfoCard(title: 'Informations', items: [
-              _InfoRow(icon: Icons.person_outline, label: 'Nom', value: _service.managerName),
-              _InfoRow(icon: Icons.email_outlined, label: 'Email', value: _service.managerEmail),
-              _InfoRow(icon: Icons.shield_outlined, label: 'Role', value: 'Manager'),
-              _InfoRow(icon: Icons.info_outline, label: 'Version', value: '1.0.0'),
-            ]),
-            const SizedBox(height: 24),
+            Container(
+              decoration: BoxDecoration(
+                  color: kInputBg, borderRadius: BorderRadius.circular(20)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 16, 20, 10),
+                  child: Text('Informations', style: TextStyle(
+                      fontFamily: 'LeagueSpartan', color: kBrown,
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ),
+                _divider(),
+                _InfoRowAsset(asset: 'assets/icons/profmanager.png',
+                    fallback: Icons.person_outlined, label: 'Nom',
+                    value: (_name.isNotEmpty) ? _name : '—'),
+                _divider(indent: 64),
+                _InfoRowAsset(asset: 'assets/icons/mail.png',
+                    fallback: Icons.email_outlined, label: 'Email',
+                    value: (_email.isNotEmpty) ? _email : '—'),
+                _divider(indent: 64),
+                _InfoRowAsset(asset: 'assets/icons/role.png',
+                    fallback: Icons.shield_outlined, label: 'Role',
+                    value: 'Manager'),
+                _divider(indent: 64),
+                _InfoRowAsset(asset: 'assets/icons/info.png',
+                    fallback: Icons.info_outline, label: 'Version',
+                    value: '1.0.0'),
+              ]),
+            ),
+            const SizedBox(height: 32),
 
-            // Logout
+            // Log Out
             GestureDetector(
               onTap: _showLogout,
-              child: Container(width: double.infinity, height: 52,
-                  decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(32), border: Border.all(color: Colors.red.withOpacity(0.3))),
-                  child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Icon(Icons.logout, color: Colors.red, size: 20),
-                    SizedBox(width: 10),
-                    Text('Se deconnecter', style: TextStyle(fontFamily: 'LeagueSpartan', color: Colors.red, fontSize: 16, fontWeight: FontWeight.w700)),
-                  ])),
+              child: Container(
+                width: 180, height: 52,
+                decoration: BoxDecoration(color: Colors.red,
+                    borderRadius: BorderRadius.circular(32)),
+                alignment: Alignment.center,
+                child: const Text('Log Out', style: TextStyle(
+                    fontFamily: 'LeagueSpartan', color: Colors.white,
+                    fontSize: 18, fontWeight: FontWeight.w800)),
+              ),
             ),
+            const SizedBox(height: 30),
           ]),
         ),
       ),
     ]);
   }
+
+  Widget _divider({double indent = 0}) =>
+      Divider(color: kBrown.withOpacity(0.08), height: 1, indent: indent);
 }
 
-class _HeaderField extends StatelessWidget {
-  final TextEditingController controller; final String hint; final bool small;
-  const _HeaderField({required this.controller, required this.hint, this.small = false});
-  @override Widget build(BuildContext context) => Container(
-    width: 220,
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(12)),
-    child: TextField(controller: controller, textAlign: TextAlign.center,
-        style: TextStyle(fontFamily: 'LeagueSpartan', color: Colors.white, fontSize: small ? 13 : 16, fontWeight: FontWeight.w600),
-        decoration: InputDecoration(hintText: hint, hintStyle: TextStyle(fontFamily: 'LeagueSpartan', color: Colors.white54, fontSize: small ? 13 : 16), border: InputBorder.none, isDense: true)),
-  );
-}
+// ── Info row with asset icon ─────────────────────────────
+class _InfoRowAsset extends StatelessWidget {
+  final String asset, label, value;
+  final IconData fallback;
+  const _InfoRowAsset({required this.asset, required this.label,
+      required this.value, required this.fallback});
 
-class _StatMini extends StatelessWidget {
-  final String label; final String value; final IconData icon;
-  const _StatMini({required this.label, required this.value, required this.icon});
-  @override Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6, offset: const Offset(0, 2))]),
-    child: Column(children: [
-      Icon(icon, color: kBrown, size: 22), const SizedBox(height: 6),
-      Text(value, style: const TextStyle(fontFamily: 'LeagueSpartan', color: kBrown, fontSize: 15, fontWeight: FontWeight.w800)), const SizedBox(height: 2),
-      Text(label, textAlign: TextAlign.center, style: TextStyle(fontFamily: 'LeagueSpartan', color: kBrown.withOpacity(0.5), fontSize: 10)),
-    ]),
-  );
-}
-
-class _InfoCard extends StatelessWidget {
-  final String title; final List<_InfoRow> items;
-  const _InfoCard({required this.title, required this.items});
-  @override Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))]),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(padding: const EdgeInsets.fromLTRB(16, 14, 16, 8), child: Text(title, style: const TextStyle(fontFamily: 'LeagueSpartan', color: kBrown, fontSize: 14, fontWeight: FontWeight.w800))),
-      Divider(color: kBrown.withOpacity(0.08), height: 1),
-      ...items.map((item) => Column(children: [item, if (item != items.last) Divider(color: kBrown.withOpacity(0.06), height: 1, indent: 52)])),
-    ]),
-  );
-}
-
-class _InfoRow extends StatelessWidget {
-  final IconData icon; final String label; final String value;
-  const _InfoRow({required this.icon, required this.label, required this.value});
-  @override Widget build(BuildContext context) => Padding(
+  @override
+  Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
     child: Row(children: [
-      Container(width: 36, height: 36, decoration: BoxDecoration(color: kInputBg, borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: kBrown, size: 18)),
-      const SizedBox(width: 12),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontFamily: 'LeagueSpartan', color: kBrown.withOpacity(0.5), fontSize: 11)),
+      Container(width: 36, height: 36,
+          decoration: BoxDecoration(color: Colors.white,
+              borderRadius: BorderRadius.circular(10)),
+          padding: const EdgeInsets.all(7),
+          child: Image.asset(asset, color: kBrown,
+              errorBuilder: (_, __, ___) =>
+                  Icon(fallback, color: kBrown, size: 18))),
+      const SizedBox(width: 14),
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: TextStyle(fontFamily: 'LeagueSpartan',
+            color: kBrown.withOpacity(0.5), fontSize: 11)),
         const SizedBox(height: 2),
-        Text(value, style: const TextStyle(fontFamily: 'LeagueSpartan', color: kBrown, fontSize: 14, fontWeight: FontWeight.w600)),
-      ])),
+        Text(value, style: const TextStyle(fontFamily: 'LeagueSpartan',
+            color: kBrown, fontSize: 15, fontWeight: FontWeight.w700)),
+      ]),
     ]),
   );
 }

@@ -46,76 +46,105 @@ class FirebaseService {
   // USERS
   // ════════════════════════════════════════════════════
 
-  /// Create user doc + role-specific doc after registration.
+  /// Called once on registration.
+  /// users/{uid}  → nom, email, role, avatar
+  /// client/{uid} → phone, dob, beans
   static Future<void> createUser({
     required String uid,
     required String nom,
     required String email,
-    required String role, // 'client' | 'manager' | 'barista'
+    required String role,
+    String phone  = '',
+    String dob    = '',
+    String avatar = '',
   }) async {
+    // ✅ users — common fields
     await _db.collection(_colUsers).doc(uid).set({
       'nom':    nom,
       'email':  email,
       'role':   role,
-      'phone':  '',
-      'dob':    '',
-      'avatar': '',
+      'avatar': avatar,
     });
 
+    // ✅ role-specific
     switch (role) {
       case 'client':
         await _db.collection(_colClient).doc(uid).set({
-          'idCl': uid, 'preferences': '',
+          'phone': phone,
+          'dob':   dob,
+          'beans': 0,
         });
         break;
       case 'manager':
         await _db.collection(_colManager).doc(uid).set({
-          'idmanager': uid, 'userid': uid,
+          'userid': uid,
         });
         break;
       case 'barista':
         await _db.collection(_colBarista).doc(uid).set({
-          'idbarista': uid, 'userid': uid,
+          'userid': uid,
         });
         break;
     }
   }
 
-  /// Fetch a user document by UID.
+  /// Save full user profile — overwrites users/{uid}.
+  static Future<void> saveUserProfile({
+    required String uid,
+    required String nom,
+    required String email,
+    required String avatar,
+    required String role,
+  }) async {
+    await _db.collection(_colUsers).doc(uid).set({
+      'nom':    nom,
+      'email':  email,
+      'role':   role,
+      'avatar': avatar,
+    });
+  }
+
+  /// Save full client data — overwrites client/{uid}.
+  static Future<void> saveClientData({
+    required String uid,
+    required String phone,
+    required String dob,
+    required int    beans,
+  }) async {
+    await _db.collection(_colClient).doc(uid).set({
+      'phone': phone,
+      'dob':   dob,
+      'beans': beans,
+    });
+  }
+
+  /// Fetch user doc from `users`.
   static Future<Map<String, dynamic>?> getUser(String uid) async {
     final doc = await _db.collection(_colUsers).doc(uid).get();
     return doc.exists ? doc.data() : null;
   }
 
-  /// Get the role string for a UID. Defaults to 'client'.
+  /// Fetch client doc from `client`.
+  static Future<Map<String, dynamic>?> getClientData(String uid) async {
+    final doc = await _db.collection(_colClient).doc(uid).get();
+    return doc.exists ? doc.data() : null;
+  }
+
+  /// Get role from users doc.
   static Future<String> getUserRole(String uid) async {
     final data = await getUser(uid);
     return (data?['role'] as String?) ?? 'client';
   }
 
-  /// Update name + email in users doc.
-  static Future<void> updateUserProfile({
-    required String uid,
-    required String nom,
-    required String email,
-  }) {
-    return _db.collection(_colUsers).doc(uid).update({
-      'nom':   nom,
-      'email': email,
-    });
-  }
-
-  ///   Update extra profile fields: phone, dob, avatar URL.
-  static Future<void> updateUserExtra({
-    required String uid,
-    required String phone,
-    required String dob,
-    required String avatar,
-  }) {
-    return _db.collection(_colUsers).doc(uid).update({
-      'phone':  phone,
-      'dob':    dob,
-      'avatar': avatar,
+  /// Add beans — reads current value then overwrites.
+  static Future<void> addBeans(String uid, int amount) async {
+    final doc = await _db.collection(_colClient).doc(uid).get();
+    final data = doc.data() ?? {};
+    final current = (data['beans'] as int?) ?? 0;
+    await _db.collection(_colClient).doc(uid).set({
+      'phone': data['phone'] ?? '',
+      'dob':   data['dob']   ?? '',
+      'beans': (current + amount).clamp(0, 2000),
     });
   }
 
@@ -123,11 +152,9 @@ class FirebaseService {
   // CONSOMMABLES (plats)
   // ════════════════════════════════════════════════════
 
-  /// Real-time stream of all consommables.
   static Stream<QuerySnapshot> watchConsommables() =>
       _db.collection(_colConsommables).snapshots();
 
-  // kept for backwards compatibility
   static Stream<QuerySnapshot> getConsommables() => watchConsommables();
 
   static Future<DocumentReference> addConsommable({
@@ -138,13 +165,15 @@ class FirebaseService {
     bool isBestSeller = false,
   }) {
     return _db.collection(_colConsommables).add({
-      'nom': nom, 'categorie': categorie,
-      'prix': prix, 'image': image,
+      'nom':          nom,
+      'categorie':    categorie,
+      'prix':         prix,
+      'image':        image,
       'isBestSeller': isBestSeller,
     });
   }
 
-  static Future<void> updateConsommable({
+  static Future<void> saveConsommable({
     required String id,
     required String nom,
     required String categorie,
@@ -152,9 +181,11 @@ class FirebaseService {
     required String image,
     bool isBestSeller = false,
   }) {
-    return _db.collection(_colConsommables).doc(id).update({
-      'nom': nom, 'categorie': categorie,
-      'prix': prix, 'image': image,
+    return _db.collection(_colConsommables).doc(id).set({
+      'nom':          nom,
+      'categorie':    categorie,
+      'prix':         prix,
+      'image':        image,
       'isBestSeller': isBestSeller,
     });
   }
@@ -179,7 +210,7 @@ class FirebaseService {
   static Future<void> addQuantiteCommandee({
     required String commandeId,
     required String consommableId,
-    required int nombre,
+    required int    nombre,
   }) {
     return _db
         .collection(_colCommande).doc(commandeId)
@@ -187,41 +218,40 @@ class FirebaseService {
         .add({'consommableId': consommableId, 'nombre': nombre});
   }
 
-  static Future<void> updateStatutCommande(
+  static Future<void> setStatutCommande(
       String commandeId, String statut) =>
-      _db.collection(_colCommande).doc(commandeId)
-          .update({'statut': statut});
+      _db.collection(_colCommande).doc(commandeId).set(
+        {'statut': statut},
+        SetOptions(merge: true),
+      );
 
-  static Future<void> cancelCommande(String commandeId, String reason) =>
-      _db.collection(_colCommande).doc(commandeId).update({
-        'statut': 'cancelled', 'cancelReason': reason,
-      });
+  static Future<void> cancelCommande(
+      String commandeId, String reason) =>
+      _db.collection(_colCommande).doc(commandeId).set(
+        {'statut': 'cancelled', 'cancelReason': reason},
+        SetOptions(merge: true),
+      );
 
-  /// Stream of orders for a specific client.
   static Stream<QuerySnapshot> watchCommandesClient(String clientId) =>
       _db.collection(_colCommande)
           .where('clientId', isEqualTo: clientId)
           .orderBy('date', descending: true)
           .snapshots();
 
-  // kept for backwards compatibility
   static Stream<QuerySnapshot> getCommandesClient(String clientId) =>
       watchCommandesClient(clientId);
 
-  /// Stream of all orders (manager/barista view).
   static Stream<QuerySnapshot> watchAllCommandes() =>
       _db.collection(_colCommande)
           .orderBy('date', descending: true)
           .snapshots();
 
-  // kept for backwards compatibility
   static Stream<QuerySnapshot> getAllCommandes() => watchAllCommandes();
 
   static Stream<QuerySnapshot> watchQuantitesCommandee(String commandeId) =>
       _db.collection(_colCommande).doc(commandeId)
           .collection(_subQteCmd).snapshots();
 
-  // kept for backwards compatibility
   static Stream<QuerySnapshot> getQuantitesCommandee(String commandeId) =>
       watchQuantitesCommandee(commandeId);
 
@@ -239,8 +269,10 @@ class FirebaseService {
     return _db.collection(_colConsommables).doc(consommableId)
         .collection(_subPersonnal)
         .add({
-      'typeLait': typeLait, 'niveauSucre': niveauSucre,
-      'saveur': saveur, 'temperature': temperature,
+      'typeLait':    typeLait,
+      'niveauSucre': niveauSucre,
+      'saveur':      saveur,
+      'temperature': temperature,
     });
   }
 
@@ -251,7 +283,7 @@ class FirebaseService {
   static Future<void> addFeedback({
     required String clientId,
     required String commandeId,
-    required int note,
+    required int    note,
     required String commentaire,
   }) {
     return _db.collection(_colFeedbacks).add({
@@ -268,7 +300,6 @@ class FirebaseService {
           .where('commandeId', isEqualTo: commandeId)
           .snapshots();
 
-  // kept for backwards compatibility
   static Stream<QuerySnapshot> getFeedbacksCommande(String commandeId) =>
       watchFeedbacksCommande(commandeId);
 

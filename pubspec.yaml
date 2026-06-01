@@ -10,30 +10,32 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  url_launcher: ^6.3.0
 
-  # ── UI ────────────────────────────────────────────
+  # ── UI
   cupertino_icons: ^1.0.8
+  google_fonts: ^6.2.1          
 
-  # ── Firebase ──────────────────────────────────────
+  # ── Firebase
   firebase_core: ^3.6.0
-  firebase_auth: ^5.3.1           # login · signup · logout
-  cloud_firestore: ^5.4.4         # database (users · orders · products)
-  firebase_storage: ^12.3.3       # images (plats · avatars · sip&share)
-  firebase_messaging: ^15.1.3     # push notifications
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.4.4
+  firebase_storage: ^12.3.3
+  firebase_messaging: ^15.1.3
 
-  # ── State & Utils ─────────────────────────────────
-  shared_preferences: ^2.3.2      # local storage (auth token · branch)
-  image_picker: ^1.1.2            # pick plat photo / avatar / sip&share
-  cached_network_image: ^3.4.1    # cache product & post images
-  intl: ^0.19.0                   # date formatting (orders · dob)
-  uuid: ^4.5.1                    # generate order IDs
+  # ── State & Utils
+  shared_preferences: ^2.3.2
+  image_picker: ^1.1.2
+  cached_network_image: ^3.4.1
+  intl: ^0.19.0
+  uuid: ^4.5.1
 
-  # ── Maps & Location ───────────────────────────────
-  google_maps_flutter: ^2.9.0     # branch map
-  geolocator: ^13.0.1             # get user location
+  # ── Maps & Location
+  google_maps_flutter: ^2.9.0
+  geolocator: ^13.0.1
 
-  # ── Permissions ───────────────────────────────────
-  permission_handler: ^11.3.1     # camera · gallery · location permissions
+  # ── Permissions
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
@@ -46,6 +48,7 @@ flutter:
   assets:
     - assets/images/
     - assets/images/branches/
+    - assets/images/games_card/
     - assets/icons/
 
   fonts:

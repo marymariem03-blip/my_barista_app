@@ -98,7 +98,7 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
 
                 //  Admin asset icon
                 Container(
-                  width: 96, height: 96,
+                  width: 128, height: 128,
                   
                   padding: const EdgeInsets.all(18),
                   child: Image.asset(

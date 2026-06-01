@@ -1,3 +1,5 @@
+// lib/screens/delete_account_screen.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -36,12 +38,10 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       return;
     }
 
-    // ── Try Auth delete first (fails fast if needs reauth) ──
     try {
       await user.delete();
     } on FirebaseAuthException catch (e) {
       if (e.code == 'requires-recent-login') {
-        // Need reauth — show password dialog
         if (mounted) await _showReauthAndDelete(user);
         return;
       }
@@ -52,22 +52,19 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       return;
     }
 
-    // ── Auth deleted — now clean up Firestore ───────────────
+    // ✅ Auth deleted — clean Firestore
     await _deleteFirestoreDocs(user.uid);
 
-    // ── Navigate to login ────────────────────────────────────
     if (mounted) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (route) => false,
-      );
+      Navigator.pushAndRemoveUntil(context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false);
     }
   }
 
+  // ✅ Delete from all collections
   Future<void> _deleteFirestoreDocs(String uid) async {
     final db = FirebaseFirestore.instance;
-    // Delete silently — don't block navigation if a doc is missing
     await Future.wait([
       db.collection('users').doc(uid).delete().catchError((_) {}),
       db.collection('client').doc(uid).delete().catchError((_) {}),
@@ -101,7 +98,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             TextField(
               controller: passCtrl,
               obscureText: true,
-              style: const TextStyle(fontFamily: 'LeagueSpartan', color: kBrown),
+              style: const TextStyle(
+                  fontFamily: 'LeagueSpartan', color: kBrown),
               decoration: InputDecoration(
                 hintText: 'Password',
                 hintStyle: TextStyle(fontFamily: 'LeagueSpartan',
@@ -136,26 +134,19 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
               onPressed: loading ? null : () async {
                 setDlg(() { loading = true; dlgError = null; });
                 try {
-                  // Re-authenticate
                   final cred = EmailAuthProvider.credential(
                     email:    user.email!,
                     password: passCtrl.text.trim(),
                   );
                   await user.reauthenticateWithCredential(cred);
-
-                  // Delete Auth account
                   await user.delete();
-
-                  // Clean Firestore
                   await _deleteFirestoreDocs(user.uid);
 
                   if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) {
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(builder: (_) => const LoginScreen()),
-                      (route) => false,
-                    );
+                    Navigator.pushAndRemoveUntil(context,
+                        MaterialPageRoute(builder: (_) => const LoginScreen()),
+                        (route) => false);
                   }
                 } on FirebaseAuthException catch (e) {
                   setDlg(() {
@@ -184,9 +175,11 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
     return Scaffold(
       backgroundColor: kBg,
+      // ✅ SharedNavBar — same as all other screens
+      bottomNavigationBar: SharedNavBar(activeIndex: -1),
       body: Column(children: [
 
-        // ── Header ────────────────────────────────────
+        // ── Header ──────────────────────────────────
         Container(
           color: kBrown,
           padding: EdgeInsets.only(
@@ -206,7 +199,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           ]),
         ),
 
-        // ── Content ───────────────────────────────────
+        // ── Content ─────────────────────────────────
         Expanded(
           child: Container(
             margin: const EdgeInsets.all(16),
@@ -240,7 +233,6 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                   _Bullet('Access to app-exclusive "My Barista" offers.'),
                   const SizedBox(height: 24),
 
-                  // Error
                   if (_errorMsg != null) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -266,7 +258,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                   GestureDetector(
                     onTap: _deleting
                         ? null
-                        : () => setState(() => _understood = !_understood),
+                        : () => setState(
+                            () => _understood = !_understood),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
@@ -275,7 +268,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(color: kBrown, width: 2),
-                            color: _understood ? kBrown : Colors.transparent,
+                            color: _understood
+                                ? kBrown : Colors.transparent,
                           ),
                           child: _understood
                               ? const Icon(Icons.check,
@@ -323,39 +317,6 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           ),
         ),
       ]),
-
-      // ── Bottom nav ────────────────────────────────────
-      bottomNavigationBar: Container(
-        height: 68,
-        decoration: const BoxDecoration(
-          color: kBrown,
-          borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(20), topRight: Radius.circular(20)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _NavBtn(path: 'assets/icons/home.png',
-                fallback: Icons.home_rounded,
-                onTap: () => Navigator.pushAndRemoveUntil(context,
-                    MaterialPageRoute(builder: (_) =>
-                        const MainScreen(initialIndex: kTabHome)),
-                    (route) => false)),
-            _NavBtn(path: 'assets/icons/order.png',
-                fallback: Icons.receipt_long_outlined,
-                onTap: () => Navigator.pushAndRemoveUntil(context,
-                    MaterialPageRoute(builder: (_) =>
-                        const MainScreen(initialIndex: kTabOrders)),
-                    (route) => false)),
-            _NavBtn(path: 'assets/icons/cup.png',
-                fallback: Icons.local_cafe_outlined,
-                onTap: () => Navigator.pushAndRemoveUntil(context,
-                    MaterialPageRoute(builder: (_) =>
-                        const MainScreen(initialIndex: kTabTrack)),
-                    (route) => false)),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -366,23 +327,13 @@ class _Bullet extends StatelessWidget {
   @override Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 6),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('  •  ', style: TextStyle(color: kBrown.withOpacity(0.8),
-          fontSize: 14, fontWeight: FontWeight.w700)),
+      Text('  •  ', style: TextStyle(
+          color: kBrown.withOpacity(0.8), fontSize: 14,
+          fontWeight: FontWeight.w700)),
       Expanded(child: Text(text, style: TextStyle(
-          fontFamily: 'LeagueSpartan', color: kBrown.withOpacity(0.8),
+          fontFamily: 'LeagueSpartan',
+          color: kBrown.withOpacity(0.8),
           fontSize: 14, height: 1.5))),
     ]),
-  );
-}
-
-class _NavBtn extends StatelessWidget {
-  final String path; final IconData fallback; final VoidCallback onTap;
-  const _NavBtn({required this.path, required this.fallback, required this.onTap});
-  @override Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Padding(padding: const EdgeInsets.all(8),
-        child: Image.asset(path, width: 28, height: 28, color: Colors.white38,
-            errorBuilder: (ctx, e, s) =>
-                Icon(fallback, color: Colors.white38, size: 28))),
   );
 }

@@ -11,7 +11,7 @@ import '../widgets/wave_painters.dart';
 import 'page3_signup_screen.dart';
 import 'find_barista_screen.dart';
 import 'manager/manager_login_screen.dart';
-import 'barista/barista_login_screen.dart'; // ← new
+import 'barista/barista_login_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -26,11 +26,10 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading       = false;
   String? _errorMsg;
 
-  // ── Hidden barista access — cup tap counter ──────────
   int  _cupTapCount   = 0;
   DateTime? _firstTap;
-  static const int    _tapsRequired = 3;
-  static const Duration _tapWindow  = Duration(seconds: 2);
+  static const int      _tapsRequired = 3;
+  static const Duration _tapWindow    = Duration(seconds: 2);
 
   static const double _bannerHeight = 180.0;
   static const double _cupWidth     = 0.80;
@@ -43,7 +42,6 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // ── Login handler ─────────────────────────────────────
   Future<void> _handleLogin() async {
     final email    = _emailCtrl.text.trim();
     final password = _passwordCtrl.text.trim();
@@ -67,23 +65,19 @@ class _LoginScreenState extends State<LoginScreen> {
       if (role == 'client') {
         Navigator.pushReplacement(context,
             MaterialPageRoute(builder: (_) => const FindBaristaScreen()));
-      } else if (role == 'manager') {
-        Navigator.pushReplacement(context,
-            MaterialPageRoute(builder: (_) => const FindBaristaScreen()));
       } else {
-        setState(() => _errorMsg = 'Unknown account role.');
+        // ✅ manager or barista — sign out silently, show generic error
+        await FirebaseService.signOut();
+        setState(() => _errorMsg = 'No account found matching these credentials.');
       }
     } else {
-      setState(() => _errorMsg = 'Incorrect email or password.');
+      setState(() => _errorMsg = 'No account found matching these credentials.');
     }
   }
 
-  // ── Hidden barista access ─────────────────────────────
-  // 3 taps on the cup image within 2 seconds → BaristaLoginScreen
   void _onCupTap() {
     final now = DateTime.now();
     if (_firstTap == null || now.difference(_firstTap!) > _tapWindow) {
-      // Reset counter
       _firstTap    = now;
       _cupTapCount = 1;
     } else {
@@ -122,7 +116,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       size: 34, color: kBrown),
                 ),
               ),
-              // Long press → Manager Login (unchanged)
               GestureDetector(
                 onLongPress: () => Navigator.push(context,
                     MaterialPageRoute(
@@ -234,11 +227,11 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ]),
 
-        // ── Cup image — 3 taps → Barista Login ──────────
+        // ── Cup — 3 taps → Barista Login ────────────────
         Positioned(
           bottom: _cupBottom, right: -0.25,
           child: GestureDetector(
-            onTap: _onCupTap,          //  hidden barista trigger
+            onTap: _onCupTap,
             behavior: HitTestBehavior.opaque,
             child: Image.asset('assets/images/cup.png',
                 width: size.width * _cupWidth, fit: BoxFit.contain),

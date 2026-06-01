@@ -1,3 +1,5 @@
+// lib/screens/profile_screen.dart
+
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -22,16 +24,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _dobCtrl   = TextEditingController();
   final _picker    = ImagePicker();
 
-  String     _avatarUrl   = '';
+  String     _avatarUrl      = '';
   XFile?     _pickedXFile;
   Uint8List? _pickedBytes;
 
-  bool    _loading       = true;
-  bool    _saving        = false;
+  bool    _loading        = true;
+  bool    _saving         = false;
   bool    _uploadingPhoto = false;
-  bool    _editMode      = false;
+  bool    _editMode       = false;
   String? _errorMsg;
   String? _successMsg;
+
+  // cached beans so we don't lose it on save
+  int _beans = 0;
 
   @override
   void initState() {
@@ -48,19 +53,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
+  // ✅ Load from both users + client
   Future<void> _loadProfile() async {
     setState(() => _loading = true);
     final uid = FirebaseService.currentUser?.uid;
     if (uid == null) { setState(() => _loading = false); return; }
 
-    final data = await FirebaseService.getUser(uid);
+    // users/{uid} — nom, email, avatar, role
+    final userData   = await FirebaseService.getUser(uid);
+    // client/{uid} — phone, dob, beans
+    final clientData = await FirebaseService.getClientData(uid);
+
     if (mounted) {
       setState(() {
-        _nameCtrl.text  = data?['nom']    as String? ?? '';
-        _emailCtrl.text = data?['email']  as String? ?? '';
-        _phoneCtrl.text = data?['phone']  as String? ?? '';
-        _dobCtrl.text   = data?['dob']    as String? ?? '';
-        _avatarUrl      = data?['avatar'] as String? ?? '';
+        _nameCtrl.text  = userData?['nom']    as String? ?? '';
+        _emailCtrl.text = userData?['email']  as String? ?? '';
+        _avatarUrl      = userData?['avatar'] as String? ?? '';
+        _phoneCtrl.text = clientData?['phone'] as String? ?? '';
+        _dobCtrl.text   = clientData?['dob']   as String? ?? '';
+        _beans          = (clientData?['beans'] as int?)  ?? 0;
         _loading        = false;
       });
     }
@@ -99,11 +110,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    setState(() {
-      _saving   = true;
-      _errorMsg = null;
-      _successMsg = null;
-    });
+    setState(() { _saving = true; _errorMsg = null; _successMsg = null; });
 
     final uid = FirebaseService.currentUser?.uid;
     if (uid == null) {
@@ -111,82 +118,67 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    // ── Step 1: Upload photo if picked ──────────────────
+    // ── Step 1: Upload avatar if picked ────────────────
     String finalAvatarUrl = _avatarUrl;
 
     if (_pickedXFile != null && _pickedBytes != null) {
       setState(() => _uploadingPhoto = true);
-
       try {
-        String uploadedUrl;
-
         if (kIsWeb) {
-          // Web: upload bytes
-          uploadedUrl = await CloudinaryService.uploadAvatarBytes(
+          finalAvatarUrl = await CloudinaryService.uploadAvatarBytes(
             bytes:    _pickedBytes!,
             fileName: _pickedXFile!.name,
           );
         } else {
-          // Mobile: upload file
-          uploadedUrl = await CloudinaryService.uploadAvatar(
+          finalAvatarUrl = await CloudinaryService.uploadAvatar(
             File(_pickedXFile!.path),
           );
         }
-
-        // ✅ Upload succeeded
-        finalAvatarUrl = uploadedUrl;
-        debugPrint('✅ Avatar uploaded: $finalAvatarUrl');
-
       } catch (e) {
-        debugPrint('❌ Avatar upload failed: $e');
-        if (mounted) {
-          setState(() {
-            _uploadingPhoto = false;
-            _saving         = false;
-            _errorMsg       = 'Upload photo echoue: ${e.toString()}';
-          });
-        }
-        return; // ← stop here, don't save with broken photo
+        if (mounted) setState(() {
+          _uploadingPhoto = false;
+          _saving         = false;
+          _errorMsg       = 'Upload photo echoue: $e';
+        });
+        return;
       }
-
       setState(() => _uploadingPhoto = false);
     }
 
-    // ── Step 2: Save text fields + avatar URL ───────────
+    // ── Step 2: Save to users + client ─────────────────
     try {
-      // Save nom + email
-      await FirebaseService.updateUserProfile(
-        uid:   uid,
-        nom:   name,
-        email: email,
-      );
-
-      // Save phone + dob + avatar URL
-      await FirebaseService.updateUserExtra(
+      // ✅ users/{uid} — nom, email, avatar, role
+      await FirebaseService.saveUserProfile(
         uid:    uid,
-        phone:  phone,
-        dob:    dob,
+        nom:    name,
+        email:  email,
         avatar: finalAvatarUrl,
+        role:   'client',
       );
 
-      debugPrint('✅ Profile saved. Avatar URL: $finalAvatarUrl');
+      // ✅ client/{uid} — phone, dob, beans (preserve beans)
+      await FirebaseService.saveClientData(
+        uid:   uid,
+        phone: phone,
+        dob:   dob,
+        beans: _beans,
+      );
 
       if (mounted) {
         setState(() {
-          _avatarUrl      = finalAvatarUrl;
-          _pickedXFile    = null;
-          _pickedBytes    = null;
-          _saving         = false;
-          _editMode       = false;
-          _successMsg     = 'Profil mis a jour avec succes !';
+          _avatarUrl   = finalAvatarUrl;
+          _pickedXFile = null;
+          _pickedBytes = null;
+          _saving      = false;
+          _editMode    = false;
+          _successMsg  = 'Profil mis a jour avec succes !';
         });
       }
     } catch (e) {
-      debugPrint('❌ Firestore save failed: $e');
       if (mounted) {
         setState(() {
           _saving   = false;
-          _errorMsg = 'Erreur Firestore: ${e.toString()}';
+          _errorMsg = 'Erreur: $e';
         });
       }
     }
@@ -194,11 +186,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _cancelEdit() {
     setState(() {
-      _editMode       = false;
-      _pickedXFile    = null;
-      _pickedBytes    = null;
-      _errorMsg       = null;
-      _successMsg     = null;
+      _editMode    = false;
+      _pickedXFile = null;
+      _pickedBytes = null;
+      _errorMsg    = null;
+      _successMsg  = null;
     });
     _loadProfile();
   }
@@ -216,13 +208,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Widget imageWidget;
 
     if (_pickedBytes != null) {
-      // Local preview
       imageWidget = Image.memory(_pickedBytes!,
           width: size, height: size, fit: BoxFit.cover,
           errorBuilder: (ctx, e, s) => _defaultAvatar());
     } else if (_avatarUrl.isNotEmpty &&
         CloudinaryService.isNetworkUrl(_avatarUrl)) {
-      // Cloudinary URL — ValueKey forces reload when URL changes
       imageWidget = Image.network(_avatarUrl,
           key: ValueKey(_avatarUrl),
           width: size, height: size, fit: BoxFit.cover,
@@ -249,7 +239,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: ClipRRect(borderRadius: BorderRadius.circular(16),
               child: imageWidget),
         ),
-        // Upload spinner overlay
         if (_uploadingPhoto)
           Positioned.fill(child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
@@ -257,7 +246,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: const Center(child: CircularProgressIndicator(
                     color: Colors.white, strokeWidth: 2))),
           )),
-        // Edit overlay
         if (_editMode && !_uploadingPhoto)
           Positioned.fill(child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
@@ -267,12 +255,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     Icon(Icons.camera_alt, color: Colors.white, size: 28),
                     SizedBox(height: 4),
-                    Text('Changer', style: TextStyle(fontFamily: 'LeagueSpartan',
+                    Text('Changer', style: TextStyle(
+                        fontFamily: 'LeagueSpartan',
                         color: Colors.white, fontSize: 11)),
                   ],
                 ))),
           )),
-        // Camera badge
         Positioned(bottom: 0, right: 0,
           child: Container(width: 32, height: 32,
             decoration: BoxDecoration(
@@ -299,34 +287,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
         height: 68,
         decoration: const BoxDecoration(color: kBrown,
             borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(20), topRight: Radius.circular(20))),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-          _NavBtn(path: 'assets/icons/home.png', fallback: Icons.home_rounded,
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20))),
+        child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+          _NavBtn(path: 'assets/icons/home.png',
+              fallback: Icons.home_rounded,
               onTap: () => Navigator.pushAndRemoveUntil(context,
-                  MaterialPageRoute(builder: (_) => const MainScreen(initialIndex: 0)),
-                  (r) => false)),
+                  MaterialPageRoute(builder: (_) =>
+                      const MainScreen(initialIndex: 0)), (r) => false)),
           _NavBtn(path: 'assets/icons/order.png',
               fallback: Icons.receipt_long_outlined,
               onTap: () => Navigator.pushAndRemoveUntil(context,
-                  MaterialPageRoute(builder: (_) => const MainScreen(initialIndex: 1)),
-                  (r) => false)),
+                  MaterialPageRoute(builder: (_) =>
+                      const MainScreen(initialIndex: 1)), (r) => false)),
           _NavBtn(path: 'assets/icons/cup.png',
               fallback: Icons.local_cafe_outlined,
               onTap: () => Navigator.pushAndRemoveUntil(context,
-                  MaterialPageRoute(builder: (_) => const MainScreen(initialIndex: 2)),
-                  (r) => false)),
+                  MaterialPageRoute(builder: (_) =>
+                      const MainScreen(initialIndex: 2)), (r) => false)),
         ]),
       ),
       body: Column(children: [
 
-        // ── Header ────────────────────────────────────
+        // ── Header ──────────────────────────────────────
         Container(
           width: double.infinity, color: kBrown,
           padding: EdgeInsets.only(
               top: topPad + 14, left: 20, right: 20, bottom: 20),
           child: Stack(alignment: Alignment.center, children: [
             Align(alignment: Alignment.centerLeft,
-                child: GestureDetector(onTap: () => Navigator.maybePop(context),
+                child: GestureDetector(
+                    onTap: () => Navigator.maybePop(context),
                     child: const Icon(Icons.chevron_left,
                         color: Colors.white, size: 34))),
             const Text('My profile', style: TextStyle(
@@ -394,7 +387,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       )),
                       const SizedBox(height: 24),
 
-                      // Success
                       if (_successMsg != null) ...[
                         Container(width: double.infinity,
                           padding: const EdgeInsets.all(12),
@@ -416,7 +408,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         const SizedBox(height: 16),
                       ],
 
-                      // Error
                       if (_errorMsg != null) ...[
                         Container(width: double.infinity,
                           padding: const EdgeInsets.all(12),
@@ -438,7 +429,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         const SizedBox(height: 16),
                       ],
 
-                      // Fields
                       const _FieldLabel('Full Name'),
                       const SizedBox(height: 8),
                       _editMode
@@ -488,7 +478,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   _uploadingPhoto
                                       ? 'Upload de la photo...'
                                       : 'Sauvegarde en cours...',
-                                  style: TextStyle(fontFamily: 'LeagueSpartan',
+                                  style: TextStyle(
+                                      fontFamily: 'LeagueSpartan',
                                       color: kBrown.withOpacity(0.6),
                                       fontSize: 12),
                                 )),
@@ -514,16 +505,21 @@ class _EditField extends StatelessWidget {
       this.keyboardType = TextInputType.text});
   @override Widget build(BuildContext context) => TextField(
     controller: controller, keyboardType: keyboardType,
-    style: const TextStyle(fontFamily: 'LeagueSpartan', color: kBrown, fontSize: 15),
+    style: const TextStyle(fontFamily: 'LeagueSpartan',
+        color: kBrown, fontSize: 15),
     decoration: InputDecoration(hintText: hint,
         hintStyle: TextStyle(fontFamily: 'LeagueSpartan',
             color: kBrown.withOpacity(0.35), fontSize: 15),
         filled: true, fillColor: kInputBg,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(32),
+        contentPadding: const EdgeInsets.symmetric(
+            horizontal: 20, vertical: 16),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(32),
             borderSide: BorderSide.none),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(32),
-            borderSide: BorderSide(color: kBrown.withOpacity(0.4), width: 1.5))),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(32),
+            borderSide: BorderSide(
+                color: kBrown.withOpacity(0.4), width: 1.5))),
   );
 }
 
@@ -544,17 +540,19 @@ class _FieldLabel extends StatelessWidget {
   final String text;
   const _FieldLabel(this.text);
   @override Widget build(BuildContext context) => Text(text,
-      style: const TextStyle(fontFamily: 'LeagueSpartan', color: kBrown,
-          fontSize: 16, fontWeight: FontWeight.w700));
+      style: const TextStyle(fontFamily: 'LeagueSpartan',
+          color: kBrown, fontSize: 16, fontWeight: FontWeight.w700));
 }
 
 class _NavBtn extends StatelessWidget {
   final String path; final IconData fallback; final VoidCallback onTap;
-  const _NavBtn({required this.path, required this.fallback, required this.onTap});
+  const _NavBtn({required this.path, required this.fallback,
+      required this.onTap});
   @override Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
     child: Padding(padding: const EdgeInsets.all(8),
-        child: Image.asset(path, width: 28, height: 28, color: Colors.white38,
+        child: Image.asset(path, width: 28, height: 28,
+            color: Colors.white38,
             errorBuilder: (ctx, e, s) =>
                 Icon(fallback, color: Colors.white38, size: 28))),
   );

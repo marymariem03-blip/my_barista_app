@@ -1,45 +1,63 @@
 // lib/core/services/firebase_plat_service.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../models/plat.dart';
 import 'i_plat_service.dart';
 
 class FirebasePlatService implements IPlatService {
 
-  static final FirebasePlatService _instance = FirebasePlatService._internal();
+  static final FirebasePlatService _instance =
+      FirebasePlatService._internal();
   factory FirebasePlatService() => _instance;
   FirebasePlatService._internal();
 
-  final _db = FirebaseFirestore.instance;
+  final _db   = FirebaseFirestore.instance;
+  final _auth = FirebaseAuth.instance;
 
-  // Local cache — populated by watchAll() stream
   final List<Plat> _cache = [];
 
-  // Manager profile
   String _managerName        = 'Manager Barista';
   String _managerEmail       = 'manager@barista.com';
   String _managerAvatarAsset = '';
 
-  // ── Stream ────────────────────────────────────────────
-  // Call once and listen; the stream updates _cache automatically.
+  static double _parsePrice(dynamic val) {
+    if (val == null) return 0.0;
+    if (val is num) return val.toDouble();
+    if (val is String) return double.tryParse(val) ?? 0.0;
+    return 0.0;
+  }
 
+  // ── Stream ────────────────────────────────────────────
   Stream<List<Plat>> watchAll() {
+    final user = _auth.currentUser;
+    print('▶ FirebasePlatService.watchAll() — '
+        'user: ${user?.uid ?? "NOT LOGGED IN"}');
+
     return _db.collection('consommables').snapshots().map((snap) {
+      print('▶ consommables snapshot: ${snap.docs.length} docs');
+
+      final plats = snap.docs.map((doc) {
+        final data = doc.data();
+        return Plat(
+          id:           doc.id,
+          name:         data['nom']           as String? ?? '',
+          category:     (data['categorie'] ??
+                         data['catagorie']    ??
+                         'hot_drinks')        as String,
+          price:        _parsePrice(data['prix']),
+          image:        data['image']         as String? ?? '',
+          // ✅ reads description, empty string if missing
+          description:  data['description']   as String? ?? '',
+          isBestSeller: data['isBestSeller']  as bool?   ?? false,
+        );
+      }).toList();
+
       _cache
         ..clear()
-        ..addAll(snap.docs.map((doc) {
-          final data = doc.data();
-          return Plat(
-            id:           doc.id,
-            name:         data['nom']          as String?  ?? '',
-            // ✅ handles both the old typo "catagorie" and correct "categorie"
-            category:     (data['categorie'] ?? data['catagorie'] ?? 'hot_drinks') as String,
-            price:        (data['prix']  as num?)?.toDouble() ?? 0.0,
-            image:        data['image']        as String?  ?? '',
-            isBestSeller: data['isBestSeller'] as bool?   ?? false,
-          );
-        }));
-      return List.unmodifiable(_cache);
+        ..addAll(plats);
+
+      return List<Plat>.unmodifiable(plats);
     });
   }
 
@@ -60,19 +78,25 @@ class FirebasePlatService implements IPlatService {
     required double price,
     required String category,
     required String image,
-    bool isBestSeller = false,
+    String description  = '',
+    bool   isBestSeller = false,
   }) {
     final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
     final plat   = Plat(id: tempId, name: name, price: price,
-        category: category, image: image, isBestSeller: isBestSeller);
+        category: category, image: image,
+        description: description, isBestSeller: isBestSeller);
 
-    // ✅ Write correct field name "categorie" (no typo)
     _db.collection('consommables').add({
       'nom':          name,
-      'categorie':    category,   // ← correct spelling
+      'categorie':    category,
       'prix':         price,
       'image':        image,
+      'description':  description, // ✅
       'isBestSeller': isBestSeller,
+    }).then((ref) {
+      print('▶ Plat added: ${ref.id}');
+    }).catchError((e) {
+      print('▶ Error adding plat: $e');
     });
 
     return plat;
@@ -85,19 +109,25 @@ class FirebasePlatService implements IPlatService {
     required double price,
     required String category,
     required String image,
-    bool isBestSeller = false,
+    String description  = '',
+    bool   isBestSeller = false,
   }) {
-    // ✅ Also fix any old docs that had the "catagorie" typo
     _db.collection('consommables').doc(id).update({
       'nom':          name,
-      'categorie':    category,   // ← correct spelling
+      'categorie':    category,
       'prix':         price,
       'image':        image,
+      'description':  description, // ✅
       'isBestSeller': isBestSeller,
+    }).then((_) {
+      print('▶ Plat updated: $id');
+    }).catchError((e) {
+      print('▶ Error updating plat: $e');
     });
 
     final updated = Plat(id: id, name: name, price: price,
-        category: category, image: image, isBestSeller: isBestSeller);
+        category: category, image: image,
+        description: description, isBestSeller: isBestSeller);
     final index = _cache.indexWhere((p) => p.id == id);
     if (index != -1) _cache[index] = updated;
     return updated;
@@ -105,20 +135,22 @@ class FirebasePlatService implements IPlatService {
 
   @override
   void delete(String id) {
-    _db.collection('consommables').doc(id).delete();
+    _db.collection('consommables').doc(id).delete()
+        .then((_) => print('▶ Plat deleted: $id'))
+        .catchError((e) => print('▶ Error deleting: $e'));
     _cache.removeWhere((p) => p.id == id);
   }
 
   // ── Stats ─────────────────────────────────────────────
 
-  @override int get totalPlats      => _cache.length;
-  @override int get totalFakeOrders => 20;
-  @override double get totalFakeSales => 204.5;
+  @override int    get totalPlats      => _cache.length;
+  @override int    get totalFakeOrders => 20;
+  @override double get totalFakeSales  => 204.5;
   @override String get mostOrderedPlat =>
       _cache.isNotEmpty ? _cache.first.name : '---';
 
-  @override Map<int, int> getOrdersPerHour()  => {};
-  @override int getMostActiveHour()           => 12;
+  @override Map<int, int> getOrdersPerHour() => {};
+  @override int getMostActiveHour()          => 12;
 
   // ── Manager profile ───────────────────────────────────
 

@@ -1,27 +1,23 @@
+// lib/screens/app_header_icons.dart
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../core/constants/colors.dart';
+import '../core/services/firebase_service.dart';
 import 'cart_screen.dart';
-import 'placeholder_screens.dart';
+import 'notifications_screen.dart';
 import 'profile_drawer_screen.dart';
 
-// ── AppHeaderIcons ────────────────────────────────────
-// Reusable row of 3 icons: Cart · Notifications · Profile
-// Use in any screen header with the same navigation behavior.
-//
-// Usage:
-//   const AppHeaderIcons()
-//
 class AppHeaderIcons extends StatelessWidget {
   const AppHeaderIcons({super.key});
 
-  // ── Open cart as slide-in overlay ────────────────────
   void _openCart(BuildContext context) {
     Navigator.push(
       context,
       PageRouteBuilder(
         opaque: false,
         barrierColor: Colors.transparent,
-        pageBuilder: (ctx, a1, a2) => const CartScreen(),
+        pageBuilder: (ctx, a1, a2) => CartScreen(),
         transitionsBuilder: (ctx, anim, a2, child) => SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(1, 0),
@@ -33,22 +29,31 @@ class AppHeaderIcons extends StatelessWidget {
     );
   }
 
-  // ── Open notifications ────────────────────────────────
   void _openNotifications(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.transparent,
+        pageBuilder: (ctx, a1, a2) => const NotificationsScreen(),
+        transitionsBuilder: (ctx, anim, a2, child) => SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
+          child: child,
+        ),
+      ),
     );
   }
 
-  // ── Open profile drawer as slide-in overlay ───────────
   void _openProfile(BuildContext context) {
     Navigator.push(
       context,
       PageRouteBuilder(
         opaque: false,
         barrierColor: Colors.transparent,
-        pageBuilder: (ctx, a1, a2) => const ProfileDrawerScreen(),
+        pageBuilder: (ctx, a1, a2) => ProfileDrawerScreen(),
         transitionsBuilder: (ctx, anim, a2, child) => SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(1, 0),
@@ -62,37 +67,74 @@ class AppHeaderIcons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final uid = FirebaseService.currentUser?.uid ?? '';
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Cart icon
+        // Cart
         _HeaderBtn(
-          path: 'assets/icons/chart.png',
+          path:     'assets/icons/chart.png',
           fallback: Icons.shopping_cart_outlined,
-          onTap: () => _openCart(context),
+          onTap:    () => _openCart(context),
         ),
         const SizedBox(width: 8),
 
-        // Notification icon
-        _HeaderBtn(
-          path: 'assets/icons/not.png',
-          fallback: Icons.notifications_outlined,
-          onTap: () => _openNotifications(context),
+        // Notification bell with unread badge
+        StreamBuilder<QuerySnapshot>(
+          stream: uid.isEmpty
+              ? const Stream.empty()
+              : FirebaseFirestore.instance
+                  .collection('notifications')
+                  .where('userId', isEqualTo: uid)
+                  .where('isRead', isEqualTo: false)
+                  .snapshots(),
+          builder: (context, snap) {
+            final unread = snap.data?.docs.length ?? 0;
+            return GestureDetector(
+              onTap: () => _openNotifications(context),
+              child: Stack(children: [
+                Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10)),
+                  child: Center(
+                    child: Image.asset(
+                      'assets/icons/not.png',
+                      width: 20, height: 20, color: kBrown,
+                      errorBuilder: (_, __, ___) => Icon(
+                          Icons.notifications_outlined,
+                          color: kBrown, size: 20),
+                    ),
+                  ),
+                ),
+                if (unread > 0)
+                  Positioned(top: 5, right: 5,
+                    child: Container(
+                      width: 8, height: 8,
+                      decoration: const BoxDecoration(
+                          color: Color(0xFFD4A017),
+                          shape: BoxShape.circle),
+                    ),
+                  ),
+              ]),
+            );
+          },
         ),
         const SizedBox(width: 8),
 
-        // Profile icon
+        // Profile
         _HeaderBtn(
-          path: 'assets/icons/prof.png',
+          path:     'assets/icons/prof.png',
           fallback: Icons.person_outline,
-          onTap: () => _openProfile(context),
+          onTap:    () => _openProfile(context),
         ),
       ],
     );
   }
 }
 
-// ── Single icon button ────────────────────────────────
 class _HeaderBtn extends StatelessWidget {
   final String path;
   final IconData fallback;
@@ -109,21 +151,16 @@ class _HeaderBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 36,
-        height: 36,
+        width: 36, height: 36,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(10),
         ),
         child: Center(
-          child: Image.asset(
-            path,
-            width: 20,
-            height: 20,
-            color: kBrown,
-            errorBuilder: (ctx, e, s) =>
-                Icon(fallback, color: kBrown, size: 20),
-          ),
+          child: Image.asset(path,
+              width: 20, height: 20, color: kBrown,
+              errorBuilder: (ctx, e, s) =>
+                  Icon(fallback, color: kBrown, size: 20)),
         ),
       ),
     );

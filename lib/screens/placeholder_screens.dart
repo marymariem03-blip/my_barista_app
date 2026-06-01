@@ -1,3 +1,5 @@
+// lib/screens/placeholder_screens.dart
+
 import 'package:flutter/material.dart';
 import '../core/constants/colors.dart';
 
@@ -45,26 +47,3 @@ class _PlaceholderScreen extends StatelessWidget {
   }
 }
 
-// CartScreen → cart_screen.dart 
-// TrackOrderScreen → track_order_screen.dart 
-
-class NotificationsScreen extends StatelessWidget {
-  const NotificationsScreen({super.key});
-  @override
-  Widget build(BuildContext context) => const _PlaceholderScreen(
-      title: 'Notifications', icon: Icons.notifications_outlined);
-}
-
-class SurpriseMeScreen extends StatelessWidget {
-  const SurpriseMeScreen({super.key});
-  @override
-  Widget build(BuildContext context) => const _PlaceholderScreen(
-      title: 'Surprise Me', icon: Icons.card_giftcard_rounded);
-}
-
-class SipAndShareScreen extends StatelessWidget {
-  const SipAndShareScreen({super.key});
-  @override
-  Widget build(BuildContext context) => const _PlaceholderScreen(
-      title: 'Sip & Share', icon: Icons.people_alt_outlined);
-}

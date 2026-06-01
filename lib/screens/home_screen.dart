@@ -1,14 +1,21 @@
 // lib/screens/home_screen.dart
 
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../core/constants/colors.dart';
 import '../core/data/app_database.dart';
+import '../core/models/plat.dart';
 import '../core/services/firebase_service.dart';
-import 'find_barista_screen.dart' show branchNotifier; 
+import 'find_barista_screen.dart' show branchNotifier;
 import 'placeholder_screens.dart';
+import 'sip_and_share_screen.dart';
 import 'games_screen.dart';
 import 'app_header_icons.dart';
-import 'menu_screen.dart';
+import 'main_screen.dart';
+import 'product_detail_screen.dart';
+import 'surprise_me_screen.dart'; // ← added
+import 'promo_banner.dart';
 
 class HomeBody extends StatefulWidget {
   const HomeBody({super.key});
@@ -19,7 +26,13 @@ class HomeBody extends StatefulWidget {
 
 class _HomeBodyState extends State<HomeBody> {
   String _userName = '';
+  int    _beans    = 0;
   bool   _loading  = true;
+
+  final Stream<QuerySnapshot> _bestSellerStream = FirebaseFirestore.instance
+      .collection('consommables')
+      .where('isBestSeller', isEqualTo: true)
+      .snapshots();
 
   @override
   void initState() {
@@ -30,19 +43,65 @@ class _HomeBodyState extends State<HomeBody> {
   Future<void> _loadUser() async {
     final uid = FirebaseService.currentUser?.uid;
     if (uid != null) {
-      final data = await FirebaseService.getUser(uid);
+      final userData   = await FirebaseService.getUser(uid);
+      final clientData = await FirebaseService.getClientData(uid);
       if (mounted) {
         setState(() {
-          _userName = (data?['nom'] as String? ?? '').split(' ').first;
+          _userName = (userData?['nom'] as String? ?? '').split(' ').first;
+          _beans    = (clientData?['beans'] as int?) ?? 0;
           _loading  = false;
         });
       }
     } else {
-      setState(() {
-        _userName = AppDB.currentUser.name.split(' ').first;
-        _loading  = false;
-      });
+      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  static double _parsePrice(dynamic val) {
+    if (val == null) return 0.0;
+    if (val is num) return val.toDouble();
+    if (val is String) return double.tryParse(val) ?? 0.0;
+    return 0.0;
+  }
+
+  Plat _docToPlat(QueryDocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return Plat(
+      id:           doc.id,
+      name:         data['nom']          as String? ?? '',
+      category:     (data['categorie'] ?? data['catagorie'] ?? 'hot_drinks') as String,
+      price:        _parsePrice(data['prix']),
+      image:        data['image']        as String? ?? '',
+      description:  (data['description'] ?? '') as String,
+      isBestSeller: data['isBestSeller'] == true,
+    );
+  }
+
+  void _goToMenu(BuildContext context) {
+    final state = context.findAncestorStateOfType<MainScreenState>();
+    if (state != null) {
+      state.switchTab(kTabMenu);
+    } else {
+      Navigator.pushAndRemoveUntil(context,
+          MaterialPageRoute(builder: (_) =>
+              const MainScreen(initialIndex: kTabMenu)),
+          (r) => false);
+    }
+  }
+
+  void _openProduct(BuildContext context, Plat plat) {
+    final product = Product(
+      id:           plat.id,
+      name:         plat.name,
+      category:     (plat.category == 'hot_drinks' ||
+                    plat.category == 'cold_drinks') ? 'drink' : 'food',
+      price:        plat.price,
+      image:        plat.image,
+      description:  plat.description,
+      isBestSeller: plat.isBestSeller,
+    );
+    Navigator.push(context, MaterialPageRoute(
+        builder: (_) => ProductDetailScreen(product: product)));
   }
 
   void _navigate(BuildContext context, Widget screen) =>
@@ -50,11 +109,9 @@ class _HomeBodyState extends State<HomeBody> {
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.of(context).padding.top;
-    final size   = MediaQuery.of(context).size;
-
-    final beans      = AppDB.currentUser.beans;
-    final beansRatio = beans / 2000.0;
+    final topPad     = MediaQuery.of(context).padding.top;
+    final size       = MediaQuery.of(context).size;
+    final beansRatio = (_beans / 2000.0).clamp(0.0, 1.0);
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -62,7 +119,7 @@ class _HomeBodyState extends State<HomeBody> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
 
-          // ── Dark brown header ─────────────────────────
+          // ── Dark brown header ───────────────────────
           Container(
             color: kBrown,
             padding: EdgeInsets.only(
@@ -78,22 +135,21 @@ class _HomeBodyState extends State<HomeBody> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-
-                          // Hello text
                           _loading
                               ? Container(width: 180, height: 28,
                                   decoration: BoxDecoration(
                                       color: Colors.white24,
                                       borderRadius: BorderRadius.circular(6)))
-                              : Text('Hello, $_userName ',
+                              : Text(
+                                  _userName.isNotEmpty
+                                      ? 'Hello, $_userName '
+                                      : 'Hello!',
                                   style: const TextStyle(
                                       fontFamily: 'LeagueSpartan',
                                       color: Colors.white,
                                       fontSize: 26,
                                       fontWeight: FontWeight.w700)),
                           const SizedBox(height: 4),
-
-                          // ✅ Reacts instantly when user picks a barista
                           ValueListenableBuilder<Branch?>(
                             valueListenable: branchNotifier,
                             builder: (_, branch, __) => Row(children: [
@@ -135,7 +191,7 @@ class _HomeBodyState extends State<HomeBody> {
                   _FeatureCard(path: 'assets/icons/gift.png',
                       fallback: Icons.card_giftcard_rounded,
                       label: 'Suprise Me',
-                      onTap: () => _navigate(context, const SurpriseMeScreen())),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SurpriseMeScreen()))), // ← updated
                   const SizedBox(width: 10),
                   _FeatureCard(path: 'assets/icons/sip_share.png',
                       fallback: Icons.people_alt_outlined,
@@ -161,10 +217,11 @@ class _HomeBodyState extends State<HomeBody> {
                         children: [
                       Row(children: [
                         _AssetIcon(path: 'assets/icons/coffee1.png',
-                            size: 14, color: Colors.white,
+                            size: 25,
+                            color: Colors.white,
                             fallback: Icons.circle),
                         const SizedBox(width: 26),
-                        Text('$beans/2000', style: const TextStyle(
+                        Text('$_beans/2000', style: const TextStyle(
                             fontFamily: 'LeagueSpartan', color: Colors.white,
                             fontSize: 20, fontWeight: FontWeight.w800)),
                       ]),
@@ -186,125 +243,69 @@ class _HomeBodyState extends State<HomeBody> {
           ),
           const SizedBox(height: 20),
 
-          // Best Seller
-          _SectionHeader(title: 'Best Seller',
-              onViewAll: () => _navigate(context, const MenuScreen())),
+          // ── Best Sellers from Firestore ─────────────
+          _SectionHeader(
+              title: 'Best Seller',
+              onViewAll: () => _goToMenu(context)),
           const SizedBox(height: 12),
           SizedBox(
             height: 200,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.only(left: 16, right: 4),
-              physics: const BouncingScrollPhysics(),
-              itemCount: kBestSellers.length,
-              itemBuilder: (_, i) {
-                final p = kBestSellers[i];
-                return _ProductCard(
-                    image: p.image, name: p.name, price: p.formattedPrice);
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _bestSellerStream,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator(
+                      color: kBrown, strokeWidth: 2));
+                }
+                final docs = snapshot.data?.docs ?? [];
+                if (docs.isEmpty) {
+                  return Center(child: Text('Aucun best seller',
+                      style: TextStyle(fontFamily: 'LeagueSpartan',
+                          color: kBrown.withOpacity(0.4), fontSize: 13)));
+                }
+                final plats = docs.map(_docToPlat).toList();
+                return ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.only(left: 16, right: 4),
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: plats.length,
+                  itemBuilder: (_, i) => _ProductCard(
+                      plat:  plats[i],
+                      onTap: () => _openProduct(context, plats[i])),
+                );
               },
             ),
           ),
           const SizedBox(height: 18),
 
-          // Promo Banner
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: Stack(clipBehavior: Clip.hardEdge, children: [
-                Container(
-                  height: 118, color: kBrown,
-                  child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                    Expanded(flex: 6, child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 0, 14),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                        const Text('Experience our\ndelicious new salad',
-                            style: TextStyle(fontFamily: 'LeagueSpartan',
-                                color: Colors.white, fontSize: 12,
-                                fontWeight: FontWeight.w500, height: 1.3)),
-                        const SizedBox(height: 3),
-                        const Text('10% OFF', style: TextStyle(
-                            fontFamily: 'LeagueSpartan', color: Colors.white,
-                            fontSize: 22, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 5),
-                          decoration: BoxDecoration(color: kBrownLight,
-                              borderRadius: BorderRadius.circular(20)),
-                          child: const Text('Order NOW', style: TextStyle(
-                              fontFamily: 'LeagueSpartan', color: Colors.white,
-                              fontSize: 10, fontWeight: FontWeight.w700)),
-                        ),
-                      ]),
-                    )),
-                    Expanded(flex: 5, child: Image.asset(
-                        'assets/images/salade_cesar.png', fit: BoxFit.cover,
-                        errorBuilder: (ctx, e, s) =>
-                            Container(color: kBrownLight))),
-                  ]),
-                ),
-                Positioned(bottom: 8, right: size.width * 0.35,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: Colors.white24,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.white38, width: 1)),
-                      child: const Text('New', style: TextStyle(
-                          fontFamily: 'LeagueSpartan', color: Colors.white,
-                          fontSize: 10, fontWeight: FontWeight.w700)),
-                    )),
-              ]),
-            ),
-          ),
+          // ── Promo Carousel ──────────────────────────
+          const PromoBanner(),
           const SizedBox(height: 20),
 
-          // Sip & Share header
+          // ── Sip & Share ─────────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-              Row(children: [
-                _AssetIcon(path: 'assets/icons/sip_share.png',
-                    size: 22, color: kBrown, fallback: Icons.people_alt),
-                const SizedBox(width: 8),
-                const Text('Sip & Share', style: TextStyle(
-                    fontFamily: 'LeagueSpartan', color: kBrown,
-                    fontSize: 20, fontWeight: FontWeight.w500)),
-              ]),
-              GestureDetector(
-                onTap: () => _navigate(context, const SipAndShareScreen()),
-                child: const Row(children: [
-                  Text('View All', style: TextStyle(fontFamily: 'LeagueSpartan',
-                      color: kBrown, fontSize: 12, fontWeight: FontWeight.w600)),
-                  Icon(Icons.chevron_right, color: kBrown, size: 18),
-                ]),
-              ),
+            child: Row(children: [
+              _AssetIcon(path: 'assets/icons/sip_share.png',
+                  size: 22, color: kBrown, fallback: Icons.people_alt),
+              const SizedBox(width: 8),
+              const Text('Sip & Share', style: TextStyle(
+                  fontFamily: 'LeagueSpartan', color: kBrown,
+                  fontSize: 20, fontWeight: FontWeight.w500)),
             ]),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 24),
 
-          // Sip & Share posts
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              children: AppDB.sipSharePosts.map((post) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _SipShareCard(
-                    avatar:    post.avatarPath,
-                    name:      post.userName,
-                    caption:   post.caption,
-                    hashtag:   post.hashtag,
-                    postImage: post.postImagePath),
-              )).toList(),
-            ),
+          Center(
+            child: Column(children: [
+              Icon(Icons.chat_bubble_outline,
+                  size: 56, color: kBrown.withOpacity(0.15)),
+              const SizedBox(height: 12),
+              Text('comming soon',
+                  style: TextStyle(fontFamily: 'LeagueSpartan',
+                      color: kBrown.withOpacity(0.4),
+                      fontSize: 15, fontWeight: FontWeight.w600)),
+            ]),
           ),
           const SizedBox(height: 90),
         ],
@@ -313,7 +314,7 @@ class _HomeBodyState extends State<HomeBody> {
   }
 }
 
-// ── Reusable widgets ──────────────────────────────────────
+// ── Reusable widgets ──────────────────────────────────
 
 class _AssetIcon extends StatelessWidget {
   final String path; final double size;
@@ -364,77 +365,51 @@ class _FeatureCard extends StatelessWidget {
 }
 
 class _ProductCard extends StatelessWidget {
-  final String image; final String name; final String price;
-  const _ProductCard({required this.image, required this.name,
-      required this.price});
-  @override Widget build(BuildContext context) => Container(
-    width: 128, margin: const EdgeInsets.only(right: 12),
-    decoration: BoxDecoration(color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07),
-            blurRadius: 8, offset: const Offset(0, 3))]),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        child: Image.asset(image, height: 115, width: double.infinity,
-            fit: BoxFit.cover,
-            errorBuilder: (ctx, e, s) => Container(height: 115, color: kInputBg,
-                child: const Center(child: Icon(Icons.coffee,
-                    color: kBrownLight, size: 38)))),
-      ),
-      Padding(padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(name, style: const TextStyle(fontFamily: 'LeagueSpartan',
-            color: kBrown, fontSize: 12, fontWeight: FontWeight.w700,
-            height: 1.2)),
-        const SizedBox(height: 3),
-        Text(price, style: const TextStyle(fontFamily: 'LeagueSpartan',
-            color: kBrownLight, fontSize: 12, fontWeight: FontWeight.w700)),
-      ])),
-    ]),
-  );
-}
+  final Plat plat;
+  final VoidCallback onTap;
+  const _ProductCard({required this.plat, required this.onTap});
 
-class _SipShareCard extends StatelessWidget {
-  final String avatar, name, caption, hashtag, postImage;
-  const _SipShareCard({required this.avatar, required this.name,
-      required this.caption, required this.hashtag, required this.postImage});
-  @override Widget build(BuildContext context) => Container(
-    height: 90,
-    decoration: BoxDecoration(color: const Color(0xFFEDE8E3),
-        borderRadius: BorderRadius.circular(16)),
-    child: Row(children: [
-      Expanded(child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(children: [
-          CircleAvatar(radius: 22, backgroundColor: kInputBg,
-              backgroundImage: AssetImage(avatar),
-              onBackgroundImageError: (e, s) {},
-              child: const Icon(Icons.person, color: kBrownLight, size: 22)),
-          const SizedBox(width: 10),
-          Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-            Text(name, style: const TextStyle(fontFamily: 'LeagueSpartan',
-                color: kBrown, fontSize: 13, fontWeight: FontWeight.w800)),
-            Text(caption, style: const TextStyle(fontFamily: 'LeagueSpartan',
-                color: Colors.black54, fontSize: 11)),
-            Text(hashtag, style: const TextStyle(fontFamily: 'LeagueSpartan',
-                color: kBrownLight, fontSize: 11,
-                fontWeight: FontWeight.w700)),
-          ])),
-        ]),
-      )),
-      ClipRRect(
-        borderRadius: const BorderRadius.only(
-            topRight: Radius.circular(16), bottomRight: Radius.circular(16)),
-        child: Image.asset(postImage, width: 120, height: 90,
-            fit: BoxFit.cover,
-            errorBuilder: (ctx, e, s) => Container(width: 120, height: 90,
-                color: kInputBg, child: const Icon(Icons.image,
-                    color: kBrownLight, size: 32))),
-      ),
-    ]),
+  @override Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: 128, margin: const EdgeInsets.only(right: 12),
+      decoration: BoxDecoration(color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07),
+              blurRadius: 8, offset: const Offset(0, 3))]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          child: _buildImage(plat.image),
+        ),
+        Padding(padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+          Text(plat.name, style: const TextStyle(fontFamily: 'LeagueSpartan',
+              color: kBrown, fontSize: 12, fontWeight: FontWeight.w700,
+              height: 1.2)),
+          const SizedBox(height: 3),
+          Text(plat.formattedPrice, style: const TextStyle(
+              fontFamily: 'LeagueSpartan',
+              color: kBrownLight, fontSize: 12, fontWeight: FontWeight.w700)),
+        ])),
+      ]),
+    ),
   );
+
+  static Widget _buildImage(String img) {
+    final placeholder = Container(height: 115, color: kInputBg,
+        child: const Center(child: Icon(Icons.coffee,
+            color: kBrownLight, size: 38)));
+    if (img.startsWith('http://') || img.startsWith('https://')) {
+      return CachedNetworkImage(
+          imageUrl: img, height: 115, width: double.infinity,
+          fit: BoxFit.cover,
+          placeholder: (_, __) => placeholder,
+          errorWidget: (_, __, ___) => placeholder);
+    }
+    return Image.asset(img, height: 115, width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => placeholder);
+  }
 }
